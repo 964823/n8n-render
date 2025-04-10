@@ -1,4 +1,4 @@
-FROM n8nio/n8n:0.234.0
+FROM n8nio/n8n:1.39.0
 
 WORKDIR /data
 
