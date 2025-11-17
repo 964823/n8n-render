@@ -1,15 +1,100 @@
-version: "3"
+version: '3.9'
 
 services:
+  #############################################
+  # 🗄️ POSTGRES — Banco de dados oficial n8n
+  #############################################
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: n8npassword
+      POSTGRES_DB: n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n"]
+      interval: 5s
+      retries: 10
+
+  #############################################
+  # 🔥 REDIS — Cache, filas e rate limit
+  #############################################
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+
+  #############################################
+  # 🚀 N8N MAIN (Editor + Webhooks)
+  #############################################
   n8n:
     image: n8nio/n8n:latest
+    restart: always
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - GENERIC_TIMEZONE=America/Sao_Paulo
+      # ===========================
+      # DATABASE
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: n8npassword
+      # ===========================
+      # REDIS
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      N8N_RATE_LIMIT_TTL: 60
+      N8N_RATE_LIMIT_MAX: 200
+      # ===========================
+      # GENERAL
+      N8N_HOST: ${N8N_HOST:-n8n.local}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://${N8N_HOST:-n8n.local}:5678
+      GENERIC_TIMEZONE: America/Sao_Paulo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
-      - ./n8n_data:/home/node/.n8n
+      - n8n_data:/home/node/.n8n
+
+  #############################################
+  # 🧵 WORKER (Processamento paralelo)
+  #############################################
+  n8n-worker:
+    image: n8nio/n8n:latest
     restart: always
+    environment:
+      EXECUTIONS_PROCESS: own
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+
+      # Banco
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: n8npassword
+
+      GENERIC_TIMEZONE: America/Sao_Paulo
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  n8n_data:
+  postgres_data:
+  redis_data:
